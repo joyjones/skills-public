@@ -39,6 +39,18 @@ function readSimpleToml(text) {
   return { root, sections };
 }
 
+function readCodexAuthKey(codexHome) {
+  if (!codexHome) return '';
+  try {
+    const authPath = path.join(codexHome, 'auth.json');
+    const auth = JSON.parse(fs.readFileSync(authPath, 'utf8'));
+    if (!auth || typeof auth !== 'object') return '';
+    return firstNonEmpty(auth.OPENAI_API_KEY, auth.api_key);
+  } catch {
+    return '';
+  }
+}
+
 function readCodexRelayConfig() {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const codexHome = process.env.CODEX_HOME || (home ? path.join(home, '.codex') : '');
@@ -57,11 +69,13 @@ function readCodexRelayConfig() {
   const activeProvider = providerName ? parsed.sections[`model_providers.${providerName}`] || {} : {};
   const provider = Object.keys(activeProvider).length ? activeProvider : parsed.root;
   const envKeyName = provider.env_key || provider.api_key_env || provider.api_key_env_var || '';
+  const authKey = readCodexAuthKey(codexHome);
   const apiKey = firstNonEmpty(
     provider.experimental_bearer_token,
     provider.bearer_token,
     provider.api_key,
     envKeyName ? process.env[envKeyName] : '',
+    authKey,
     parsed.root.experimental_bearer_token,
     parsed.root.bearer_token,
     parsed.root.api_key

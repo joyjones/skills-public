@@ -69,5 +69,28 @@ withEnv({
   assert.equal(config.apiKey, 'explicit-token');
 });
 
+writeCodexConfig(codexHome, `
+model_provider = "custom"
+
+[model_providers.custom]
+base_url = "https://tokens.joyjones.cn/v1"
+`);
+fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'auth-json-token' }), 'utf8');
+
+withEnv({
+  CODEX_HOME: codexHome,
+  CUSTOMAPI_IMAGE_API_KEY: undefined,
+  CUSTOMAPI_IMAGE_BASE_URL: undefined,
+  COWART_IMAGE_API_KEY: 'legacy-token',
+  COWART_IMAGE_BASE_URL: 'https://wcf.maitokens.com/v1',
+  MOHEN_IMAGE_API_KEY: undefined,
+  MOHEN_IMAGE_BASE_URL: undefined
+}, () => {
+  const config = resolveRelayConfigFromEnvironment();
+  assert.equal(config.source, 'codex:custom');
+  assert.equal(config.baseUrl, 'https://tokens.joyjones.cn/v1');
+  assert.equal(config.apiKey, 'auth-json-token');
+});
+
 fs.rmSync(tempRoot, { recursive: true, force: true });
 process.stdout.write('config resolution ok\n');

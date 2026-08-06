@@ -24,7 +24,7 @@ Mohen installer compatibility variables:
 - `MOHEN_IMAGE_BASE_URL`
 - `MOHEN_IMAGE_MODEL`
 
-If those variables are missing or point to a known direct upstream host, the script can fall back to `~/.codex/config.toml` when the active Codex provider uses a known relay host.
+If those variables are missing or point to a known direct upstream host, the script can fall back to `~/.codex/config.toml` when the active Codex provider uses a known relay host. In that mode it reads the local provider key from `experimental_bearer_token`, the provider's `env_key`, or `~/.codex/auth.json`.
 
 Check the non-secret resolved configuration:
 
