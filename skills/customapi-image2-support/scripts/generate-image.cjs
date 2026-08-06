@@ -14,11 +14,37 @@ function hostOf(value) {
   }
 }
 
+function firstNonEmpty(...values) {
+  return values.find((value) => String(value || '').trim()) || '';
+}
+
+function readSimpleToml(text) {
+  const root = {};
+  const sections = {};
+  let current = root;
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+    if (sectionMatch) {
+      current = sections[sectionMatch[1]] || {};
+      sections[sectionMatch[1]] = current;
+      continue;
+    }
+
+    const kvMatch = line.match(/^([A-Za-z0-9_.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))/);
+    if (kvMatch) current[kvMatch[1]] = kvMatch[2] ?? kvMatch[3] ?? kvMatch[4] ?? '';
+  }
+  return { root, sections };
+}
+
 function readCodexRelayConfig() {
   const home = process.env.USERPROFILE || process.env.HOME || '';
-  if (!home) return {};
+  const codexHome = process.env.CODEX_HOME || (home ? path.join(home, '.codex') : '');
+  if (!codexHome) return {};
 
-  const configPath = path.join(home, '.codex', 'config.toml');
+  const configPath = path.join(codexHome, 'config.toml');
   let text = '';
   try {
     text = fs.readFileSync(configPath, 'utf8');
@@ -26,49 +52,68 @@ function readCodexRelayConfig() {
     return {};
   }
 
-  const baseUrl = text.match(/^\s*base_url\s*=\s*"([^"]+)"/m)?.[1] || '';
-  const apiKey = text.match(/^\s*experimental_bearer_token\s*=\s*"([^"]+)"/m)?.[1] || '';
-  return { apiKey, baseUrl };
+  const parsed = readSimpleToml(text);
+  const providerName = parsed.root.model_provider || '';
+  const activeProvider = providerName ? parsed.sections[`model_providers.${providerName}`] || {} : {};
+  const provider = Object.keys(activeProvider).length ? activeProvider : parsed.root;
+  const envKeyName = provider.env_key || provider.api_key_env || provider.api_key_env_var || '';
+  const apiKey = firstNonEmpty(
+    provider.experimental_bearer_token,
+    provider.bearer_token,
+    provider.api_key,
+    envKeyName ? process.env[envKeyName] : '',
+    parsed.root.experimental_bearer_token,
+    parsed.root.bearer_token,
+    parsed.root.api_key
+  );
+  const baseUrl = firstNonEmpty(provider.base_url, parsed.root.base_url);
+  return { apiKey, baseUrl, source: providerName ? `codex:${providerName}` : 'codex' };
 }
 
-function firstNonEmpty(...values) {
-  return values.find((value) => String(value || '').trim()) || '';
+function configFromEnv(prefix, source) {
+  return {
+    apiKey: process.env[`${prefix}_API_KEY`] || '',
+    baseUrl: process.env[`${prefix}_BASE_URL`] || '',
+    model: process.env[`${prefix}_MODEL`] || '',
+    source
+  };
 }
 
 function resolveRelayConfigFromEnvironment() {
-  const apiKey = firstNonEmpty(
-    process.env.CUSTOMAPI_IMAGE_API_KEY,
-    process.env.COWART_IMAGE_API_KEY,
-    process.env.MOHEN_IMAGE_API_KEY
-  );
-  const baseUrl = firstNonEmpty(
-    process.env.CUSTOMAPI_IMAGE_BASE_URL,
-    process.env.COWART_IMAGE_BASE_URL,
-    process.env.MOHEN_IMAGE_BASE_URL
-  );
-  const model = firstNonEmpty(
-    process.env.CUSTOMAPI_IMAGE_MODEL,
-    process.env.COWART_IMAGE_MODEL,
-    process.env.MOHEN_IMAGE_MODEL,
-    'gpt-image-2'
-  );
-
-  const codexConfig = readCodexRelayConfig();
   const staleDirectHosts = new Set(['wcf.maitokens.com', 'www.maitokens.com', 'maitokens.com']);
   const knownRelayHosts = new Set(['tokens.joyjones.cn', 'token.mohenai.com']);
-  const envHost = hostOf(baseUrl);
-  const codexHost = hostOf(codexConfig.baseUrl);
+  const candidates = [
+    configFromEnv('CUSTOMAPI_IMAGE', 'env:CUSTOMAPI_IMAGE'),
+    readCodexRelayConfig(),
+    configFromEnv('MOHEN_IMAGE', 'env:MOHEN_IMAGE'),
+    configFromEnv('COWART_IMAGE', 'env:COWART_IMAGE'),
+    {
+      apiKey: process.env.OPENAI_API_KEY || '',
+      baseUrl: process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE || '',
+      model: process.env.OPENAI_MODEL || '',
+      source: 'env:OPENAI'
+    }
+  ].map((candidate) => ({
+    ...candidate,
+    baseUrl: withoutTrailingSlash(candidate?.baseUrl),
+    model: firstNonEmpty(candidate?.model, 'gpt-image-2'),
+    host: hostOf(candidate?.baseUrl)
+  }));
 
-  if (
-    knownRelayHosts.has(codexHost) &&
-    codexConfig.apiKey &&
-    codexConfig.baseUrl &&
-    (!apiKey || !baseUrl || staleDirectHosts.has(envHost))
-  ) {
-    return { apiKey: codexConfig.apiKey, baseUrl: codexConfig.baseUrl, model };
-  }
+  const complete = candidates.filter((candidate) => candidate.apiKey && candidate.baseUrl);
+  const explicitCustom = complete.find((candidate) => candidate.source === 'env:CUSTOMAPI_IMAGE');
+  if (explicitCustom) return explicitCustom;
 
-  return { apiKey, baseUrl, model };
+  const codexRelay = complete.find((candidate) => String(candidate.source || '').startsWith('codex:') && knownRelayHosts.has(candidate.host));
+  if (codexRelay) return codexRelay;
+
+  const knownRelay = complete.find((candidate) => knownRelayHosts.has(candidate.host));
+  if (knownRelay) return knownRelay;
+
+  const nonStale = complete.find((candidate) => !staleDirectHosts.has(candidate.host));
+  if (nonStale) return nonStale;
+
+  return complete[0] || candidates[0] || { apiKey: '', baseUrl: '', model: 'gpt-image-2', source: 'none', host: '' };
 }
 
 function safeErrorMessage(value, apiKey) {
@@ -147,6 +192,7 @@ async function main() {
     process.stdout.write(`${JSON.stringify({
       baseHost: hostOf(relayConfig.baseUrl),
       basePath: relayConfig.baseUrl ? new URL(relayConfig.baseUrl).pathname : '',
+      source: relayConfig.source || '',
       apiKeyPresent: Boolean(relayConfig.apiKey),
       apiKeyLength: relayConfig.apiKey ? relayConfig.apiKey.length : 0,
       model: relayConfig.model
@@ -173,4 +219,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { generateImage, resolveRelayConfigFromEnvironment };
+module.exports = { generateImage, resolveRelayConfigFromEnvironment, readCodexRelayConfig, readSimpleToml };

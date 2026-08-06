@@ -33,11 +33,14 @@ if (-not (Test-Path -LiteralPath $node)) { $node = (Get-Command node -ErrorActio
 The generator reads, in order:
 
 1. `CUSTOMAPI_IMAGE_API_KEY`, `CUSTOMAPI_IMAGE_BASE_URL`, `CUSTOMAPI_IMAGE_MODEL`.
-2. Legacy `COWART_IMAGE_API_KEY`, `COWART_IMAGE_BASE_URL`, `COWART_IMAGE_MODEL`.
+2. The active `~/.codex/config.toml` relay provider when it points to a known relay host.
 3. Installer compatibility `MOHEN_IMAGE_API_KEY`, `MOHEN_IMAGE_BASE_URL`, `MOHEN_IMAGE_MODEL`.
-4. The active `~/.codex/config.toml` relay provider when it points to a known relay host.
+4. Legacy `COWART_IMAGE_API_KEY`, `COWART_IMAGE_BASE_URL`, `COWART_IMAGE_MODEL`, except stale direct upstream hosts are lower priority than the active Codex relay.
+5. `OPENAI_API_KEY` plus `OPENAI_BASE_URL`/`OPENAI_API_BASE` only when they point to a known relay host.
 
 If configuration is absent, tell the user to finish the custom API relay setup. Do not request credentials in chat.
+
+For diagnosis, run the generator with `--print-config`. The safe output must show the intended relay host and a non-secret `source` such as `codex:custom` or `env:CUSTOMAPI_IMAGE`. If it shows a stale direct upstream host such as `wcf.maitokens.com`, fix the local relay configuration before retrying image generation.
 
 ## Acceptance Standard
 
@@ -57,4 +60,3 @@ If the API reports no available channel, distinguish platform routing from upstr
 Image generation should use the same user API key and same account balance as text by default. Do not create an image-only user token or separate wallet unless a proven platform limitation requires it.
 
 Keep user-side relay deduction separate from supplier or upstream cost. Image output tokens usually dominate the billed amount.
-

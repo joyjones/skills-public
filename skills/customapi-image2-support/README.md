@@ -26,6 +26,14 @@ Mohen installer compatibility variables:
 
 If those variables are missing or point to a known direct upstream host, the script can fall back to `~/.codex/config.toml` when the active Codex provider uses a known relay host.
 
+Check the non-secret resolved configuration:
+
+```bash
+node ~/.codex/skills/customapi-image2-support/scripts/generate-image.cjs --print-config
+```
+
+Expected output should show `baseHost` as your relay host, for example `tokens.joyjones.cn`, and `source` as `codex:custom` or `env:CUSTOMAPI_IMAGE`. If it shows `wcf.maitokens.com`, the machine is still using stale direct-upstream image variables instead of the relay.
+
 ## Manual Smoke Test
 
 ```powershell
@@ -35,4 +43,3 @@ if (-not (Test-Path -LiteralPath $node)) { $node = (Get-Command node -ErrorActio
 ```
 
 Success means the command prints JSON with a non-empty PNG `outputPath`.
-
